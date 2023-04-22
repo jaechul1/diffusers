@@ -843,7 +843,7 @@ class CrossAttnDownBlock2D(nn.Module):
         # TODO(Patrick, William) - attention mask is not used
         output_states = ()
 
-        for resnet, attn in zip(self.resnets, self.attentions):
+        for i, (resnet, attn) in enumerate(zip(self.resnets, self.attentions)):
             if self.training and self.gradient_checkpointing:
 
                 def create_custom_forward(module, return_dict=None):
@@ -859,14 +859,14 @@ class CrossAttnDownBlock2D(nn.Module):
                 hidden_states = torch.utils.checkpoint.checkpoint(
                     create_custom_forward(attn, return_dict=False),
                     hidden_states,
-                    encoder_hidden_states,
+                    encoder_hidden_states[i],
                     cross_attention_kwargs,
                 )[0]
             else:
                 hidden_states = resnet(hidden_states, temb)
                 hidden_states = attn(
                     hidden_states,
-                    encoder_hidden_states=encoder_hidden_states,
+                    encoder_hidden_states=encoder_hidden_states[i],
                     cross_attention_kwargs=cross_attention_kwargs,
                 ).sample
 
@@ -1829,7 +1829,7 @@ class CrossAttnUpBlock2D(nn.Module):
         attention_mask=None,
     ):
         # TODO(Patrick, William) - attention mask is not used
-        for resnet, attn in zip(self.resnets, self.attentions):
+        for i, (resnet, attn) in enumerate(zip(self.resnets, self.attentions)):
             # pop res hidden states
             res_hidden_states = res_hidden_states_tuple[-1]
             res_hidden_states_tuple = res_hidden_states_tuple[:-1]
@@ -1850,14 +1850,14 @@ class CrossAttnUpBlock2D(nn.Module):
                 hidden_states = torch.utils.checkpoint.checkpoint(
                     create_custom_forward(attn, return_dict=False),
                     hidden_states,
-                    encoder_hidden_states,
+                    encoder_hidden_states[i],
                     cross_attention_kwargs,
                 )[0]
             else:
                 hidden_states = resnet(hidden_states, temb)
                 hidden_states = attn(
                     hidden_states,
-                    encoder_hidden_states=encoder_hidden_states,
+                    encoder_hidden_states=encoder_hidden_states[i],
                     cross_attention_kwargs=cross_attention_kwargs,
                 ).sample
 

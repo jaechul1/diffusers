@@ -695,12 +695,12 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
 
         # 3. down
         down_block_res_samples = (sample,)
-        for downsample_block in self.down_blocks:
+        for i, downsample_block in enumerate(self.down_blocks):
             if hasattr(downsample_block, "has_cross_attention") and downsample_block.has_cross_attention:
                 sample, res_samples = downsample_block(
                     hidden_states=sample,
                     temb=emb,
-                    encoder_hidden_states=encoder_hidden_states,
+                    encoder_hidden_states=encoder_hidden_states[2*i:2*i+2],
                     attention_mask=attention_mask,
                     cross_attention_kwargs=cross_attention_kwargs,
                 )
@@ -725,7 +725,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
             sample = self.mid_block(
                 sample,
                 emb,
-                encoder_hidden_states=encoder_hidden_states,
+                encoder_hidden_states=encoder_hidden_states[6],
                 attention_mask=attention_mask,
                 cross_attention_kwargs=cross_attention_kwargs,
             )
@@ -750,7 +750,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                     hidden_states=sample,
                     temb=emb,
                     res_hidden_states_tuple=res_samples,
-                    encoder_hidden_states=encoder_hidden_states,
+                    encoder_hidden_states=encoder_hidden_states[3*i+4:3*i+7],
                     cross_attention_kwargs=cross_attention_kwargs,
                     upsample_size=upsample_size,
                     attention_mask=attention_mask,
