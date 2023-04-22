@@ -156,6 +156,7 @@ def log_validation(text_encoder, tokenizer, unet, vae, args, accelerator, weight
     return images
 
 
+# When "args.prompt_plus" = True, 16 textual embeddings will be saved each of which occupies "args.num_vectors" tokens
 def save_progress(text_encoder, placeholder_token_ids, accelerator, args, save_path):
     logger.info("Saving embeddings")
     learned_embeds = (
@@ -163,7 +164,15 @@ def save_progress(text_encoder, placeholder_token_ids, accelerator, args, save_p
         .get_input_embeddings()
         .weight[min(placeholder_token_ids) : max(placeholder_token_ids) + 1]
     )
-    learned_embeds_dict = {args.placeholder_token: learned_embeds.detach().cpu()}
+
+    if args.prompt_plus:
+        learned_embeds = learned_embeds.chunk(len(attn_pos))
+        learned_embeds_dict = {}
+        for i, pos in enumerate(attn_pos):
+            learned_embeds_dict[f"{args.placeholder_token}_{pos}"] = learned_embeds[i].detach().cpu()
+    else:
+        learned_embeds_dict = {args.placeholder_token: learned_embeds.detach().cpu()}
+
     torch.save(learned_embeds_dict, save_path)
 
 
@@ -407,6 +416,14 @@ def parse_args():
     parser.add_argument(
         "--enable_xformers_memory_efficient_attention", action="store_true", help="Whether or not to use xformers."
     )
+    parser.add_argument(
+        "--prompt_plus",
+        action="store_true",
+        help=(
+            "Whether or not to use prompt-plus textual inversion, 16 placeholder tokens will be used when enabled."
+            " Refer to https://prompt-plus.github.io/"
+        ),
+    )
 
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
@@ -471,6 +488,10 @@ imagenet_style_templates_small = [
     "a large painting in the style of {}",
 ]
 
+# Additional tokens when using Prompt-plus. Each token implies 'resolution-(down/mid/up)-index'
+# Down blocks have 2 cross attention layers, mid block has 1 and up blocks have 3.
+attn_pos = ['64d0', '64d1', '32d0', '32d1', '16d0', '16d1', '8m', 
+            '16u0', '16u1', '16u2', '32u0', '32u1', '32u2', '64u0', '64u1', '64u2']
 
 class TextualInversionDataset(Dataset):
     def __init__(
@@ -485,7 +506,10 @@ class TextualInversionDataset(Dataset):
         set="train",
         placeholder_token="*",
         center_crop=False,
+        prompt_plus=False,
     ):
+        self.prompt_plus = prompt_plus
+
         self.data_root = data_root
         self.tokenizer = tokenizer
         self.learnable_property = learnable_property
@@ -523,7 +547,12 @@ class TextualInversionDataset(Dataset):
             image = image.convert("RGB")
 
         placeholder_string = self.placeholder_token
-        text = random.choice(self.templates).format(placeholder_string)
+
+        # When Prompt-plus is enabled, text should be a list of length 16
+        if self.prompt_plus:
+            text = [choice.format(f"{placeholder_string}_{pos}") for (choice, pos) in zip([random.choice(self.templates)] * len(attn_pos), attn_pos)]
+        else:
+            text = random.choice(self.templates).format(placeholder_string)
 
         example["input_ids"] = self.tokenizer(
             text,
@@ -531,7 +560,10 @@ class TextualInversionDataset(Dataset):
             truncation=True,
             max_length=self.tokenizer.model_max_length,
             return_tensors="pt",
-        ).input_ids[0]
+        ).input_ids
+
+        if not self.prompt_plus:
+            example["input_ids"] = example["input_ids"][0]
 
         # default to score-sde preprocessing
         img = np.array(image).astype(np.uint8)
@@ -619,6 +651,7 @@ def main():
     unet = UNet2DConditionModel.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision
     )
+    unet.prompt_plus = args.prompt_plus
 
     # Add the placeholder token in tokenizer
     placeholder_tokens = [args.placeholder_token]
@@ -632,8 +665,11 @@ def main():
         additional_tokens.append(f"{args.placeholder_token}_{i}")
     placeholder_tokens += additional_tokens
 
+    if args.prompt_plus:
+        placeholder_tokens = [f"{token}_{pos}" for pos in attn_pos for token in placeholder_tokens]
+
     num_added_tokens = tokenizer.add_tokens(placeholder_tokens)
-    if num_added_tokens != args.num_vectors:
+    if num_added_tokens != args.num_vectors * (len(attn_pos) if args.prompt_plus else 1):
         raise ValueError(
             f"The tokenizer already contains the token {args.placeholder_token}. Please pass a different"
             " `placeholder_token` that is not already in the tokenizer."
@@ -714,6 +750,7 @@ def main():
         learnable_property=args.learnable_property,
         center_crop=args.center_crop,
         set="train",
+        prompt_plus=args.prompt_plus,
     )
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.train_batch_size, shuffle=True, num_workers=args.dataloader_num_workers
@@ -840,8 +877,18 @@ def main():
                 # (this is the forward diffusion process)
                 noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
 
-                # Get the text embedding for conditioning
-                encoder_hidden_states = text_encoder(batch["input_ids"])[0].to(dtype=weight_dtype)
+                # Get the text embedding for conditioning.
+                if args.prompt_plus:
+                    # Collapse the first two dimensions B*16->16B of batch["input_ids"] to pass it into text_encoder
+                    encoder_hidden_states = text_encoder(batch["input_ids"].view(-1, tokenizer.model_max_length))[0].to(dtype=weight_dtype)
+                
+                    # Revert to the original dimension
+                    encoder_hidden_states = encoder_hidden_states.view(args.train_batch_size, len(attn_pos), tokenizer.model_max_length, -1)
+                    
+                    # Permute to match unet_2d_condition when Prompt-plus is enabled, i.e., encoder_hidden_states[i]: (batch, sequence_length, feature_dim)
+                    encoder_hidden_states = encoder_hidden_states.permute(1, 0, 2, 3)
+                else:
+                    encoder_hidden_states = text_encoder(batch["input_ids"])[0].to(dtype=weight_dtype)
 
                 # Predict the noise residual
                 model_pred = unet(noisy_latents, timesteps, encoder_hidden_states).sample

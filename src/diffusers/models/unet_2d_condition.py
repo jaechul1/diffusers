@@ -120,6 +120,9 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
             `only_cross_attention` is given as a single boolean and `mid_block_only_cross_attention` is None, the
             `only_cross_attention` value will be used as the value for `mid_block_only_cross_attention`. Else, it will
             default to `False`.
+        prompt_plus (`bool`, *optional*, defaults to `False`):
+            Whether or not to use prompt-plus textual inversion, 16 placeholder tokens will be used when enabled. 
+            Refer to https://prompt-plus.github.io/
     """
 
     _supports_gradient_checkpointing = True
@@ -170,9 +173,11 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         class_embeddings_concat: bool = False,
         mid_block_only_cross_attention: Optional[bool] = None,
         cross_attention_norm: Optional[str] = None,
+        prompt_plus: bool = False,
     ):
         super().__init__()
 
+        self.prompt_plus = prompt_plus
         self.sample_size = sample_size
 
         # Check inputs
@@ -343,6 +348,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                 resnet_skip_time_act=resnet_skip_time_act,
                 resnet_out_scale_factor=resnet_out_scale_factor,
                 cross_attention_norm=cross_attention_norm,
+                prompt_plus=prompt_plus,
             )
             self.down_blocks.append(down_block)
 
@@ -428,6 +434,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                 resnet_skip_time_act=resnet_skip_time_act,
                 resnet_out_scale_factor=resnet_out_scale_factor,
                 cross_attention_norm=cross_attention_norm,
+                prompt_plus=prompt_plus,
             )
             self.up_blocks.append(up_block)
             prev_output_channel = output_channel
@@ -700,7 +707,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                 sample, res_samples = downsample_block(
                     hidden_states=sample,
                     temb=emb,
-                    encoder_hidden_states=encoder_hidden_states[2*i:2*i+2],
+                    encoder_hidden_states=encoder_hidden_states[2*i:2*i+2] if self.prompt_plus else encoder_hidden_states,
                     attention_mask=attention_mask,
                     cross_attention_kwargs=cross_attention_kwargs,
                 )
@@ -725,7 +732,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
             sample = self.mid_block(
                 sample,
                 emb,
-                encoder_hidden_states=encoder_hidden_states[6],
+                encoder_hidden_states=encoder_hidden_states[6] if self.prompt_plus else encoder_hidden_states,
                 attention_mask=attention_mask,
                 cross_attention_kwargs=cross_attention_kwargs,
             )
@@ -750,7 +757,7 @@ class UNet2DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                     hidden_states=sample,
                     temb=emb,
                     res_hidden_states_tuple=res_samples,
-                    encoder_hidden_states=encoder_hidden_states[3*i+4:3*i+7],
+                    encoder_hidden_states=encoder_hidden_states[3*i+4:3*i+7] if self.prompt_plus else encoder_hidden_states, 
                     cross_attention_kwargs=cross_attention_kwargs,
                     upsample_size=upsample_size,
                     attention_mask=attention_mask,

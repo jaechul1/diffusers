@@ -46,6 +46,7 @@ def get_down_block(
     resnet_skip_time_act=False,
     resnet_out_scale_factor=1.0,
     cross_attention_norm=None,
+    prompt_plus=False,
 ):
     down_block_type = down_block_type[7:] if down_block_type.startswith("UNetRes") else down_block_type
     if down_block_type == "DownBlock2D":
@@ -109,6 +110,7 @@ def get_down_block(
             only_cross_attention=only_cross_attention,
             upcast_attention=upcast_attention,
             resnet_time_scale_shift=resnet_time_scale_shift,
+            prompt_plus=prompt_plus,
         )
     elif down_block_type == "SimpleCrossAttnDownBlock2D":
         if cross_attention_dim is None:
@@ -227,6 +229,7 @@ def get_up_block(
     resnet_skip_time_act=False,
     resnet_out_scale_factor=1.0,
     cross_attention_norm=None,
+    prompt_plus=False,
 ):
     up_block_type = up_block_type[7:] if up_block_type.startswith("UNetRes") else up_block_type
     if up_block_type == "UpBlock2D":
@@ -277,6 +280,7 @@ def get_up_block(
             only_cross_attention=only_cross_attention,
             upcast_attention=upcast_attention,
             resnet_time_scale_shift=resnet_time_scale_shift,
+            prompt_plus=prompt_plus,
         )
     elif up_block_type == "SimpleCrossAttnUpBlock2D":
         if cross_attention_dim is None:
@@ -772,8 +776,12 @@ class CrossAttnDownBlock2D(nn.Module):
         use_linear_projection=False,
         only_cross_attention=False,
         upcast_attention=False,
+        prompt_plus=False,
     ):
         super().__init__()
+
+        self.prompt_plus = prompt_plus
+
         resnets = []
         attentions = []
 
@@ -859,14 +867,14 @@ class CrossAttnDownBlock2D(nn.Module):
                 hidden_states = torch.utils.checkpoint.checkpoint(
                     create_custom_forward(attn, return_dict=False),
                     hidden_states,
-                    encoder_hidden_states[i],
+                    encoder_hidden_states[i] if self.prompt_plus else encoder_hidden_states,
                     cross_attention_kwargs,
                 )[0]
             else:
                 hidden_states = resnet(hidden_states, temb)
                 hidden_states = attn(
                     hidden_states,
-                    encoder_hidden_states=encoder_hidden_states[i],
+                    encoder_hidden_states=encoder_hidden_states[i] if self.prompt_plus else encoder_hidden_states,
                     cross_attention_kwargs=cross_attention_kwargs,
                 ).sample
 
@@ -1757,8 +1765,12 @@ class CrossAttnUpBlock2D(nn.Module):
         use_linear_projection=False,
         only_cross_attention=False,
         upcast_attention=False,
+        prompt_plus = False,
     ):
         super().__init__()
+
+        self.prompt_plus = prompt_plus
+
         resnets = []
         attentions = []
 
@@ -1850,14 +1862,14 @@ class CrossAttnUpBlock2D(nn.Module):
                 hidden_states = torch.utils.checkpoint.checkpoint(
                     create_custom_forward(attn, return_dict=False),
                     hidden_states,
-                    encoder_hidden_states[i],
+                    encoder_hidden_states[i] if self.prompt_plus else encoder_hidden_states,
                     cross_attention_kwargs,
                 )[0]
             else:
                 hidden_states = resnet(hidden_states, temb)
                 hidden_states = attn(
                     hidden_states,
-                    encoder_hidden_states=encoder_hidden_states[i],
+                    encoder_hidden_states=encoder_hidden_states[i] if self.prompt_plus else encoder_hidden_states,
                     cross_attention_kwargs=cross_attention_kwargs,
                 ).sample
 
