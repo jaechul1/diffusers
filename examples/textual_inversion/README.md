@@ -94,6 +94,19 @@ to a number larger than one, *e.g.*:
 
 The saved textual inversion vectors will then be larger in size compared to the default case.
 
+Also, To use [Prompt-plus extended textual inversion](https://prompt-plus.github.io/), 
+additional argument
+```
+--prompt_plus
+```
+will do. This will generate 16 textual embeddings in total each of which is conditioned only in one cross attention layer. Generated embeddings are called, 
+for example, `<cat-toy>_64d0`. `X_64d0` here implies it is conditioned in the first *(0)* cross attention layer in the down block *(d)* of resolution *64*. 
+Note that down blocks have 2 cross attentions each, mid block has 1 and up blocks have 3 each. Similarly, 
+`X_64d0, X_64d1, X_32d0, X_32d1, X_16d0, X_16d1, X_8m, X_16u0, X_16u1, X_16u2, X_32u0, X_32u1, X_32u2, X_64u0, X_64u1, X_64u2`.
+These embeddings should be fed separately through a text prompt of length 16 when text conditioned. 
+`--num_vectors` arg is still able to be specified. In this case, the saved textual inversion vectors will be of size 
+`16 * num_vectors` times larger than vanilla textual inversion. 
+
 ### Inference
 
 Once you have trained a model using above command, the inference can be done simply using the `StableDiffusionPipeline`. Make sure to include the `placeholder_token` in your prompt.
