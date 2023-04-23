@@ -649,9 +649,8 @@ def main():
     )
     vae = AutoencoderKL.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision)
     unet = UNet2DConditionModel.from_pretrained(
-        args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision
+        args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision, prompt_plus=args.prompt_plus
     )
-    unet.prompt_plus = args.prompt_plus
 
     # Add the placeholder token in tokenizer
     placeholder_tokens = [args.placeholder_token]
